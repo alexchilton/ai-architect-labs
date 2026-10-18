@@ -11,3 +11,6 @@ data/
 *.log
 __pycache__/
 .DS_Store
+
+# Distilled module specs are dense paraphrase of paid content — local only
+docs/specs/
