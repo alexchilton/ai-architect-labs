@@ -1,0 +1,13 @@
+# Paid course content — NEVER commit (copyright). Local reference only.
+transcripts/
+*-course.json
+
+# Executed notebooks carry baked output; commit the plain-named source only
+*_executed.ipynb
+.ipynb_checkpoints/
+
+# Scratch / data / logs
+data/
+*.log
+__pycache__/
+.DS_Store
