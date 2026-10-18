@@ -19,7 +19,13 @@ A single point every AI call passes through, so callers never hardcode a provide
 - centralises caching (exact-match, semantic, prompt-prefix) and full-context logging (input, output,
   version, tokens, latency, cost);
 - callers talk to a **thin internal adapter**, not the gateway API directly, so a gateway migration
-  touches one file. (LiteLLM is the common off-the-shelf gateway; the pattern matters more than the tool.)
+  touches one file. The gateway is a **role** — the single chokepoint for keys, routing, cost attribution,
+  rate limits, caching, and guardrail *hooks* — not a product. Common fills by context: **LiteLLM** (OSS,
+  multi-provider / on-prem), **Azure APIM's GenAI-gateway** pattern (Azure-native), Portkey / Kong / Cloudflare
+  AI Gateway. The pattern matters more than the tool. Do **not** conflate the gateway with the **guardrail
+  engine** (Llama Guard, NeMo, Azure AI Content Safety) — the gateway is a good place to *run* guardrails, not
+  a substitute for them. Running it for guardrails only is a legitimate slice; the other features are there
+  when a second model, team, or budget appears.
 
 ## 2. Handle probabilistic output — constrain, validate, route
 - **Constrain at the source:** JSON mode / tool-call structured output; version the output schema like an
@@ -59,27 +65,54 @@ rate, fallback-trigger rate).
 
 ## 5a. Integration diagram template (Mermaid) — emit it, matched to the prose
 A diagram that disagrees with the text is worse than none: same component names, same tiers, same
-fallbacks. Fill the placeholders; render it in the doc.
+fallbacks. Fill the placeholders; render it (Mermaid in `.md`; a graphviz PNG in a notebook). **Follow the
+AI-diagram convention from `system-architecture` §5a**: colour-code by component kind *with a legend* (model/
+probabilistic, deterministic control = the trust boundary, data, human, failure, gate), annotate each model
+node with model + version + P95, mark the probabilistic nodes, and draw the trust boundary explicitly.
 ````
 ```mermaid
 flowchart TB
-    app[application] --> adapter[thin internal adapter]
-    adapter --> hit{cache hit?}
-    hit -->|yes| out[response]
-    hit -->|no| gw[gateway: route by task/cost/latency]
-    gw -->|routine| cheap[<cheap tier / self-host>]
-    gw -->|complex| front[<frontier tier>]
-    cheap --> val[3-tier validation: schema -> semantic -> business rule]
+    classDef model fill:#ffe0b2,stroke:#e65100,color:#000;
+    classDef control fill:#bbdefb,stroke:#1565c0,color:#000;
+    classDef data fill:#e0e0e0,stroke:#616161,color:#000;
+    classDef fail fill:#ffcdd2,stroke:#c62828,color:#000;
+    classDef gate fill:#fff59d,stroke:#f9a825,color:#000;
+    classDef ok fill:#a5d6a7,stroke:#2e7d32,color:#000;
+    app[caller]:::control --> adapter[thin internal adapter]:::control
+    subgraph tb[trust boundary — deterministic control code]
+      adapter --> hit{cache hit?}:::gate
+      hit -->|no| gw[gateway: route by task/cost/latency + tag spend]:::control
+      gw --> val[3-tier validation:<br/>schema → semantic → business]:::control
+      val -->|schema/semantic fail| retry[bounded retry-with-correction]:::control
+      cache[(write cache: exact + semantic,<br/>validated output only)]:::data
+    end
+    hit -->|yes| out[response]:::ok
+    gw -->|routine| cheap["cheap tier — &lt;model@ver&gt; P95 &lt;x&gt;s (PROBABILISTIC)"]:::model
+    gw -->|complex| front["frontier tier — &lt;model@ver&gt; P95 &lt;y&gt;s (PROBABILISTIC)"]:::model
+    cheap --> val
     front --> val
-    val -->|schema/semantic fail| retry[bounded retry-with-correction]
+    cheap -. transport error .-> br{breaker open?}:::gate
+    front -. transport error .-> br
+    br -->|yes| fb
     retry --> gw
-    val -->|business-rule fail| esc[escalate — NOT retried]
-    val -->|ok| cache[(write cache: exact + semantic)]
+    val -->|business-rule fail| esc[escalate — NOT retried]:::fail
+    val -->|ok| cache
     cache --> out
-    gw -. breaker trips .-> fb[fallback: templated / degraded message]
+    br -. trips .-> fb[fallback: templated / degraded]:::fail
     fb --> out
+    subgraph legend[colour legend]
+      lm[model — probabilistic, validate output]:::model
+      lc[control — deterministic code = trust boundary]:::control
+      ld[data store / cache / log]:::data
+      lg[decision gate]:::gate
+      lf[failure / escalate / fallback]:::fail
+      lo[validated output]:::ok
+    end
 ```
 ````
+(`:::class` colours a node; the `legend` subgraph documents what each colour means; annotate every model node
+with `model@version` + its P95 and mark it PROBABILISTIC. The notebook equivalent uses `arch_kit.dnode` /
+`diagram_legend`, rendered to a PNG.)
 
 ## 6. When code is scaffolded
 Reference code ships **secure-by-default and resilient-by-default**: the adapter interface (not raw

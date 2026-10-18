@@ -82,42 +82,71 @@ task/trajectory/safety metrics, where it attaches); a cost + latency budget (tok
 limits, circuit breakers); and explicit caveats (what the design simplifies, what needs legal review).
 
 ## 5a. Diagram templates (Mermaid) — emit these, don't just name them
-Produce real diagrams, not a sentence saying "add a diagram". Mermaid renders on GitHub and in a
-notebook. **The diagram must match the prose**: same component names, same model versions, same latency
-numbers — a diagram that disagrees with the text is worse than none. Fill the placeholders from *this*
-project; delete rows that don't apply.
+Produce real diagrams, not a sentence saying "add a diagram". Mermaid renders on GitHub `.md`; **in a
+notebook, render to an image** (graphviz PNG cell output — GitHub does not render Mermaid inside `.ipynb`).
+AI architecture diagrams are **more explicit than normal ones** (the course's point):
+- **Colour must carry meaning, with a legend.** One documented scheme: *model/LLM (probabilistic — validate
+  its output)*, *deterministic control / app code (the trust boundary)*, *data store/index/log*, *human in
+  the loop*, *failure/block/escalate*, *decision gate*. Never colour decoratively; always include the legend.
+- **Annotate the AI-specific detail**: each model node with its model + version + P95 latency budget; mark
+  which nodes are **probabilistic** (and therefore need validation); draw the **trust boundary** explicitly
+  (what is enforced in code vs what the model merely proposes); label edges with the **failure mode** handled.
+- **The diagram must match the prose**: same component names, model versions, and latency numbers — a diagram
+  that disagrees with the text is worse than none. Fill the placeholders from *this* project; delete rows
+  that don't apply. (Mermaid colour via `classDef` + `:::class`; in notebooks use the `arch_kit` `dnode` /
+  `diagram_legend` helpers.)
 
 **Context diagram** — the capability and every system it touches (mark frozen systems):
 ````
 ```mermaid
 flowchart LR
-    user([caller]) -->|query| gw[AI gateway]
-    gw --> cap[<capability, e.g. RAG answerer>]
-    cap -->|retrieve| idx[(vector index)]
-    cap -->|LLM call| llm[<model>@<locus>, e.g. qwen2.5:7b@self-host]
-    cap -->|on failure| fb[fallback: templated / human escalation]
-    src[(<source systems>, e.g. Confluence/Jira)] -->|ingest + ACL tag| idx
-    classDef frozen fill:#eee,stroke:#999,color:#333;
-    class src frozen
+    classDef model fill:#ffe0b2,stroke:#e65100,color:#000;
+    classDef control fill:#bbdefb,stroke:#1565c0,color:#000;
+    classDef data fill:#e0e0e0,stroke:#616161,color:#000;
+    classDef fail fill:#ffcdd2,stroke:#c62828,color:#000;
+    classDef frozen fill:#f5f5f5,stroke:#999,stroke-dasharray:4,color:#333;
+    user([caller]):::control -->|query| gw[AI gateway]:::control
+    gw --> cap[capability, e.g. RAG answerer]:::control
+    cap -->|retrieve| idx[(vector index)]:::data
+    cap -->|LLM call| llm["&lt;model&gt;@&lt;locus&gt; e.g. qwen2.5:7b@self-host<br/>P95 &lt;x&gt;s (PROBABILISTIC)"]:::model
+    cap -->|on failure| fb[fallback: templated / human escalation]:::fail
+    src[(source systems, e.g. Confluence/Jira — FROZEN)]:::frozen -->|ingest + ACL tag| idx
+    subgraph legend[colour legend]
+      lm[model — probabilistic]:::model
+      lc[control / app code]:::control
+      ld[data store / index]:::data
+      lf[failure path]:::fail
+      lz[frozen external system]:::frozen
+    end
 ```
 ````
 
-**Component diagram** — annotate model version + the P95 latency budget per step:
+**Component diagram** — colour by kind, annotate model version + the P95 budget per step, mark the model probabilistic:
 ````
 ```mermaid
 flowchart TB
-    subgraph path[request path — P95 budget <X>s]
-      q[query] --> rw[query rewrite ~<a>ms]
-      rw --> ret[retrieve top-k + ACL pre-filter ~<b>ms]
-      ret --> rr[rerank ~<c>ms]
-      rr --> gen[generate — <model> P95 ~<d>s]
-      gen --> val[3-tier output validation]
+    classDef model fill:#ffe0b2,stroke:#e65100,color:#000;
+    classDef control fill:#bbdefb,stroke:#1565c0,color:#000;
+    classDef fail fill:#ffcdd2,stroke:#c62828,color:#000;
+    classDef ok fill:#a5d6a7,stroke:#2e7d32,color:#000;
+    subgraph path["request path — P95 budget &lt;X&gt;s (control = trust boundary)"]
+      q[query]:::control --> rw[query rewrite ~&lt;a&gt;ms]:::control
+      rw --> ret[retrieve top-k + ACL pre-filter ~&lt;b&gt;ms]:::control
+      ret --> rr[rerank ~&lt;c&gt;ms]:::control
+      rr --> gen["generate — &lt;model@ver&gt; P95 ~&lt;d&gt;s (PROBABILISTIC)"]:::model
+      gen --> val[3-tier output validation]:::control
     end
-    val -->|schema/semantic fail| retry[bounded retry]
+    val -->|schema/semantic fail| retry[bounded retry]:::control
     retry --> gen
-    retry -->|exhausted| fb[templated fallback]
-    val -->|business-rule fail| esc[escalate — NOT retried]
-    val -->|ok| out[answer + citations]
+    retry -->|exhausted| fb[templated fallback]:::fail
+    val -->|business-rule fail| esc[escalate — NOT retried]:::fail
+    val -->|ok| out[answer + citations]:::ok
+    subgraph legend[colour legend]
+      lm[model — probabilistic, validate]:::model
+      lc[control / app code]:::control
+      lf[failure / escalate]:::fail
+      lo[validated output]:::ok
+    end
 ```
 ````
 

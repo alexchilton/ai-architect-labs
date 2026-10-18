@@ -124,3 +124,36 @@ def rrf(*rankings: list[int], k: int = 60) -> list[int]:
 def order(scores: list[float]) -> list[int]:
     """Doc ids sorted by score, best first (stable: ties keep index order)."""
     return [i for i, _ in sorted(enumerate(scores), key=lambda kv: kv[1], reverse=True)]
+
+
+# --- diagrams: one documented colour scheme, so colour carries meaning (per the course's diagram spec) ---
+# graphviz is imported lazily inside the helpers so notebooks that draw nothing don't need it installed.
+DIAGRAM_KINDS = {
+    "model":   ("#ffe0b2", "probabilistic — an LLM/model call, output MUST be validated"),
+    "control": ("#bbdefb", "deterministic control / app code — the trust boundary"),
+    "data":    ("#e0e0e0", "data store / index / log"),
+    "human":   ("#c8e6c9", "human in the loop"),
+    "ok":      ("#a5d6a7", "success / validated output"),
+    "fail":    ("#ffcdd2", "failure, block, or escalate path"),
+    "gate":    ("#fff59d", "decision / policy gate"),
+}
+
+def dnode(g, nid, label, kind="control", **attrs):
+    """Add a node whose FILL COLOUR encodes its kind (see DIAGRAM_KINDS). Gates are diamonds."""
+    fill, _ = DIAGRAM_KINDS[kind]
+    shape = "diamond" if kind == "gate" else "box"
+    style = "filled" if kind == "gate" else "rounded,filled"
+    g.node(nid, label, shape=shape, style=style, fillcolor=fill, **attrs)
+
+def diagram_legend(g, kinds, title="colour legend (what each fill means)"):
+    """Add a dashed legend cluster so every diagram documents its colour code."""
+    with g.subgraph(name="cluster_legend") as c:
+        c.attr(label=title, style="dashed", color="#888888", fontsize="10")
+        prev = None
+        for k in kinds:
+            fill, desc = DIAGRAM_KINDS[k]
+            nid = "legend_" + k
+            c.node(nid, desc, shape="box", style="filled", fillcolor=fill, fontsize="9")
+            if prev is not None:
+                c.edge(prev, nid, style="invis")   # stack the legend vertically
+            prev = nid
