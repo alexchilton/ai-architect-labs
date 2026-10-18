@@ -1,9 +1,9 @@
 """Tiny shared harness for the AI Architect tutorial notebooks.
 
 Local only: nothing leaves http://127.0.0.1:11434 (Ollama). No key, no cloud.
-Just the pieces the RAG/agent notebooks need — embeddings, a chat call, and the
-classic retrieval primitives (BM25, reciprocal-rank fusion) — implemented in the
-standard library so a reader can see exactly what each one does.
+The retrieval primitives (a small analyzer + BM25 + reciprocal-rank fusion) are
+stdlib so a reader sees exactly what each does. This is a teaching harness, not a
+production index — the docstrings say where it is deliberately simpler than Lucene.
 """
 from __future__ import annotations
 import json, math, re, urllib.request
@@ -22,10 +22,15 @@ def _post(path: str, payload: dict, timeout: float = 120) -> dict:
 
 
 def embed(text: str, model: str = EMBED_MODEL) -> list[float]:
+    # Ollama's /api/embeddings (prompt=) still works; /api/embed (input=) is the newer path.
     return _post("/api/embeddings", {"model": model, "prompt": text})["embedding"]
 
 
 def cosine(a: list[float], b: list[float]) -> float:
+    # Raise on length mismatch rather than silently truncating — a mixed-embedder bug
+    # (the exact thing the architecture skill warns about) must fail loudly here.
+    if len(a) != len(b):
+        raise ValueError(f"vector length mismatch {len(a)} vs {len(b)} — same embedder on both sides?")
     dot = sum(x * y for x, y in zip(a, b))
     na = sum(x * x for x in a) ** 0.5
     nb = sum(y * y for y in b) ** 0.5
@@ -41,16 +46,28 @@ def chat(prompt: str, system: str = "", model: str = CHAT_MODEL,
     return r.get("message", {}).get("content", "")
 
 
-# --- classic lexical retrieval, so hybrid search is visible, not a black box ----
+# --- a small analyzer, so BM25 behaves like a real lexical index, not a strawman ----
 
+# A real engine (Lucene/Elastic/Qdrant) runs an analyzer: lowercase, drop stopwords,
+# and stem. Without one, "to" matches everything and "expenses" != "expense" — which
+# makes a toy BM25 look worse than it is. This is a light analyzer (stopwords + plural
+# stripping); a production system uses a full stemmer (Porter/Snowflake).
+STOPWORDS = {
+    "a","an","the","of","to","for","in","on","at","by","and","or","is","are","be","was",
+    "were","with","as","it","its","this","that","these","those","from","per","i","you",
+    "can","my","me","do","how","what","which","up","within",
+}
 _TOK = re.compile(r"[a-z0-9]+")
+def _stem(w: str) -> str:
+    return w[:-1] if len(w) > 3 and w.endswith("s") else w   # crude plural strip only
 def tokenize(text: str) -> list[str]:
-    return _TOK.findall(text.lower())
+    return [_stem(w) for w in _TOK.findall(text.lower()) if w not in STOPWORDS]
 
 
 class BM25:
-    """Minimal BM25 over an in-memory corpus. Catches exact terms (IDs, codes)
-    that dense vectors miss — the reason hybrid retrieval exists."""
+    """Minimal BM25 over an in-memory corpus, with the light analyzer above. Catches
+    exact terms (IDs, codes) that dense vectors can miss. NOTE: repeated query terms
+    double-count (as in `rank_bm25`); fine for a teaching corpus."""
     def __init__(self, docs: list[str], k1: float = 1.5, b: float = 0.75):
         self.docs = docs
         self.tok = [tokenize(d) for d in docs]
@@ -83,10 +100,16 @@ class BM25:
             out.append(s)
         return out
 
+    def ranking(self, query: str) -> list[int]:
+        """Doc ids that actually matched a query term (score > 0), best first.
+        Excludes zero-score docs so RRF never credits a doc that matched nothing."""
+        sc = self.scores(query)
+        return [i for i in order(sc) if sc[i] > 0]
+
 
 def rrf(*rankings: list[int], k: int = 60) -> list[int]:
-    """Reciprocal-rank fusion: combine several ranked id-lists into one.
-    Each list is doc ids best-first. Returns fused ids best-first."""
+    """Reciprocal-rank fusion: combine several ranked id-lists (best-first) into one.
+    Lists may be partial — a doc absent from a list simply gets no contribution from it."""
     score: dict[int, float] = {}
     for ranking in rankings:
         for rank, doc_id in enumerate(ranking):
@@ -95,5 +118,5 @@ def rrf(*rankings: list[int], k: int = 60) -> list[int]:
 
 
 def order(scores: list[float]) -> list[int]:
-    """Doc ids sorted by score, best first."""
+    """Doc ids sorted by score, best first (stable: ties keep index order)."""
     return [i for i, _ in sorted(enumerate(scores), key=lambda kv: kv[1], reverse=True)]

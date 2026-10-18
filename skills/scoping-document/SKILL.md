@@ -40,8 +40,10 @@ Score each dimension (strong / workable / weak), with one line of evidence each:
 - **Human-in-the-loop viability** — can a checkpoint fit the actual workflow and volume.
 
 Then check the four hard disqualifiers. If any holds, say so plainly and stop recommending AI:
-the problem is actually deterministic; the required data does not exist; error tolerance is
-effectively zero; regulation forbids it.
+the problem is actually deterministic; the required data does not exist; **error tolerance is
+effectively zero *and* no human can sit in the loop** (if a human can, reframe to human-in-the-loop
+rather than disqualify — a zero-tolerance task with review is a design, not a dead end); regulation
+forbids it.
 
 ### 3. Classify the problem
 - Place it on two axes: **generative vs discriminative** (open-ended output vs a bounded category/score)
@@ -94,9 +96,10 @@ a feedback/retraining-loop component when ground truth arrives late.
 ## Quality gates (the document is not done until these hold)
 - Metrics are numeric and time-bound. Reject "improve accuracy"; require "cut escalation rate from
   X% to Y% by <date>".
-- Disambiguate loaded terms: "false positive rate" means different things to the business (share of
-  all cases wrongly declined) and to operations (share of flagged cases that are false alarms) —
-  state both when they appear.
+- Disambiguate loaded terms with their exact definitions. "False positive rate" is ambiguous: the
+  statistical **FPR** = false positives / all *actually-legitimate* cases (legitimate cases wrongly
+  flagged), whereas operations usually mean the **false-discovery rate** = false positives / all
+  *flagged* cases. They are different numbers; say which you mean and state both.
 - Separate containment (resolved without a human) from resolution and from satisfaction; do not
   collapse them.
 - Latency targets are P95, not median; name the synchronous path separately from any asynchronous one.

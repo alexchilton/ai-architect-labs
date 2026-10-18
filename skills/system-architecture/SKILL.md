@@ -22,11 +22,18 @@ Pick from the six core patterns and justify each against the scoped need, not be
 A system is usually a composition. State which capability uses which pattern.
 
 ## 2. Design the RAG stack (if used), component by component
-- **Ingestion:** parse → **semantic-boundary chunking** (never fixed character counts — that causes
-  coreference collapse) → embed → vector store. Record source version + timestamp per chunk.
-- **Retrieval:** query rewrite (condense chat history to a standalone query) → embed with the *same*
-  model as the corpus → **hybrid search** (dense + BM25, fused with RRF — dense alone misses exact
-  IDs/codes) → **cross-encoder rerank** → context assembly → generation with explicit grounding.
+- **Ingestion:** parse → **chunk so every chunk is self-contained** (structure-aware where the source
+  has structure; token-sized with overlap otherwise; always attach document/section context so a chunk
+  does not lose a mid-sentence fact or what a pronoun refers to) → embed → vector store. Record source
+  version + timestamp per chunk. (Avoid the absolutes in both directions: "never fixed-size" is as wrong
+  as "always fixed-size" — the test is self-containment, measured on your data.)
+- **Retrieval:** query rewrite (condense chat history to a standalone query — and treat it as an
+  injection surface, since chat history is attacker-reachable) → embed with the *same* model as the
+  corpus → **hybrid search** (dense + BM25 *with a real analyzer: stopwords + stemming*, fused with RRF).
+  Dense embedders *vary* on opaque tokens — add BM25 and **measure the delta on your golden set** rather
+  than assuming it; a strong embedder on a small clean corpus may show no gain → **cross-encoder rerank**
+  (measure its latency/quality trade-off; skip only with a number) → context assembly → generation with
+  explicit grounding.
 - **Design against the production failure modes, by name:**
   - *coreference collapse* → contextual chunk enrichment.
   - *absence blindness* (no "I don't know") → a retrieval-confidence gate before generation.
@@ -40,8 +47,8 @@ A system is usually a composition. State which capability uses which pattern.
   delete, staging).
 - **Memory tiers:** in-context / external short-term / external long-term / procedural — matched to real
   persistence needs, with **write gates** (explicit / confidence-gated / extract-then-store) so poisoned
-  or low-quality facts never enter long-term memory. TTL and an erasure index are legal requirements,
-  not hygiene.
+  or low-quality facts never enter long-term memory. Under GDPR (and similar regimes), for personal
+  data, TTL and an erasure index are legal requirements, not hygiene.
 - **Multi-agent:** orchestrator-owns-state to start; treat every inter-agent message as **untrusted**.
 - **Design against:** cost spirals (token/step budgets + alerts), non-determinism (version logging +
   deterministic post-processing + a human gate for high-stakes), context mismanagement (summarisation /
@@ -50,12 +57,21 @@ A system is usually a composition. State which capability uses which pattern.
 ## 4. Security section (always) — structural, not prompt-level
 Retrieved content and tool output are an **attack surface** (indirect injection). Required controls,
 enforced in code not the prompt:
-- trust-tier / provenance labelling of all external content;
+- trust-tier / provenance labelling of all external content; segregate tiers and forbid untrusted
+  content from triggering consequential actions;
 - no consequential tool call in the same turn as freshly-ingested untrusted content;
-- access control as a **query-time pre-filter** (never post-processing), with document-level ACLs;
-- output sanitisation against auto-rendering exfiltration (e.g. markdown images).
-(These mirror the measured results in the companion `ai_security_labs` repo — prompt-level framing does
-not hold; structure does.)
+- **least-privilege tools** (read-only connectors by default; a write/delete tool is a deliberate,
+  gated decision);
+- access control as a **query-time pre-filter** (never post-processing), with document-level ACLs —
+  because a post-filter after top-k retrieval both loses recall and leaks ranking signal about docs the
+  caller may not see;
+- a **URL/domain allowlist** for any fetch tool, and **output sanitisation** against auto-rendering
+  exfiltration (e.g. markdown images) — both are how the markdown-image exfil is killed;
+- **ingestion-time scanning** for hidden instructions (white-on-white text, zero-width chars in PDFs);
+- a **per-answer audit** of which chunk IDs fed each response, for debugging and incident blast-radius.
+(These mirror the *measured* results in the companion `ai_security_labs` repo — e.g. `module05`
+Lab 45: prompt-level boundary framing did **not** hold on a 7B; `gap_mcp_jira_injection`: a read-only
+connector was compromised 0/3 while a deny-by-default approval gate held. Structure holds; prompts do not.)
 
 ## 5. The architecture document
 Write `docs/architecture-<project-slug>.md` with: problem + chosen pattern(s) and why; a **context
@@ -70,16 +86,21 @@ Do not stop at the document. Scaffold, to the project's language:
 - **Secure-by-default reference code** for the component (e.g. a retrieval function with the query-time
   ACL pre-filter and trust-tiering already in place — security is the default, not a TODO).
 - **A small set of meaningful tests** — each asserts a real behaviour, contract, or security property
-  and carries a one-line rationale. Examples worth their place: hybrid retrieval ranks an exact-ID query
-  above dense-only; the confidence gate abstains on an unanswerable query; a planted indirect-injection
-  doc does **not** cause a tool call; an unauthorised caller never retrieves a restricted document. Never
-  write a test whose only effect is to raise coverage.
+  and carries a one-line rationale, and is written so it can actually fail. Examples worth their place:
+  the exact-ID doc is retrievable through the **lexical path alone** (BM25 rank 1 with dense disabled —
+  a falsifiable contract, unlike "hybrid beats dense" which is false when dense already ranks it #1); the
+  confidence gate abstains on an **off-topic** query *and* its documented limitation is pinned (it does
+  not catch on-topic-but-unanswerable — assert that so it can't silently regress into a false
+  groundedness claim); a planted indirect-injection doc does **not** cause a tool call; an unauthorised
+  caller never retrieves a restricted document. Never write a test whose only effect is to raise coverage,
+  and never calibrate a threshold on the same examples you then assert on.
 - **An eval harness** for the AI component: a small golden set and the metric that matters (recall@k for
   retrieval, groundedness/abstention for generation), runnable as a gate.
 
 ## Anti-patterns to flag
-Fixed-size chunking; vector-only retrieval; skipping rerank; ignoring the write/freshness side;
-unbounded agent loops; treating the system prompt as the safety layer instead of application-layer
+Chunks that aren't self-contained; vector-only retrieval where lexical signal matters; skipping rerank
+without measuring it; ignoring the write/freshness side; unbounded agent loops; calibrating a threshold
+on its own test set; treating the system prompt as the safety layer instead of application-layer
 enforcement.
 
 ## Output and handoff
