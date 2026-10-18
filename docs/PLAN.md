@@ -43,3 +43,18 @@ Each maps to an "Optional: …" closer. A skill takes a short brief and scaffold
 Notebooks first (per decision 2026-10-18): **nb02_rag_architecture → nb02_vector_index → nb02_agent_memory → nb04_gateway_litellm → nb06_eval_stack → nb05_security_guardrails → nb07_cost_scaling → nb02_agent_protocols**, then the Track-B skills.
 
 Before each notebook: read that module's transcripts (local) so the build reflects the course's actual framing, not an inference.
+
+## Comprehension checks (every notebook)
+
+Each notebook ends with a **"Check your understanding"** section: 4–6 questions tied to what the
+notebook actually demonstrated (not trivia), each answer hidden behind a collapsible block so you can
+self-test before revealing:
+
+```markdown
+**Q1.** Why does structured-query routing beat forcing everything through vector search?
+<details><summary>answer</summary> ...grounded in the result the notebook showed... </details>
+```
+
+Mix of recall ("what did X measure"), application ("which control would you add here"), and
+design-judgment ("when would HNSW lose to IVF") questions. Answers reference the notebook's own
+measured output where possible, so the check stays honest to what was shown.
