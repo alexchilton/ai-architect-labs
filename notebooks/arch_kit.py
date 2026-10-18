@@ -38,11 +38,15 @@ def cosine(a: list[float], b: list[float]) -> float:
 
 
 def chat(prompt: str, system: str = "", model: str = CHAT_MODEL,
-         temperature: float = 0.0, num_predict: int = 400) -> str:
+         temperature: float = 0.0, num_predict: int = 400, num_ctx: int | None = None) -> str:
+    # num_ctx MUST be set for long-context work: Ollama's default window (often 2k-4k) silently
+    # truncates a long prompt, which would turn a context experiment into a truncation artifact.
+    opts = {"temperature": temperature, "num_predict": num_predict}
+    if num_ctx is not None:
+        opts["num_ctx"] = num_ctx
     msgs = ([{"role": "system", "content": system}] if system else []) + \
            [{"role": "user", "content": prompt}]
-    r = _post("/api/chat", {"model": model, "messages": msgs, "stream": False,
-                            "options": {"temperature": temperature, "num_predict": num_predict}})
+    r = _post("/api/chat", {"model": model, "messages": msgs, "stream": False, "options": opts})
     return r.get("message", {}).get("content", "")
 
 

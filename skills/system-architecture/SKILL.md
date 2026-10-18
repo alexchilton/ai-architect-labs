@@ -81,6 +81,75 @@ model; freshness/staleness SLA; the security section; an evaluation plan (golden
 task/trajectory/safety metrics, where it attaches); a cost + latency budget (token ceilings, step
 limits, circuit breakers); and explicit caveats (what the design simplifies, what needs legal review).
 
+## 5a. Diagram templates (Mermaid) — emit these, don't just name them
+Produce real diagrams, not a sentence saying "add a diagram". Mermaid renders on GitHub and in a
+notebook. **The diagram must match the prose**: same component names, same model versions, same latency
+numbers — a diagram that disagrees with the text is worse than none. Fill the placeholders from *this*
+project; delete rows that don't apply.
+
+**Context diagram** — the capability and every system it touches (mark frozen systems):
+````
+```mermaid
+flowchart LR
+    user([caller]) -->|query| gw[AI gateway]
+    gw --> cap[<capability, e.g. RAG answerer>]
+    cap -->|retrieve| idx[(vector index)]
+    cap -->|LLM call| llm[<model>@<locus>, e.g. qwen2.5:7b@self-host]
+    cap -->|on failure| fb[fallback: templated / human escalation]
+    src[(<source systems>, e.g. Confluence/Jira)] -->|ingest + ACL tag| idx
+    classDef frozen fill:#eee,stroke:#999,color:#333;
+    class src frozen
+```
+````
+
+**Component diagram** — annotate model version + the P95 latency budget per step:
+````
+```mermaid
+flowchart TB
+    subgraph path[request path — P95 budget <X>s]
+      q[query] --> rw[query rewrite ~<a>ms]
+      rw --> ret[retrieve top-k + ACL pre-filter ~<b>ms]
+      ret --> rr[rerank ~<c>ms]
+      rr --> gen[generate — <model> P95 ~<d>s]
+      gen --> val[3-tier output validation]
+    end
+    val -->|schema/semantic fail| retry[bounded retry]
+    retry --> gen
+    retry -->|exhausted| fb[templated fallback]
+    val -->|business-rule fail| esc[escalate — NOT retried]
+    val -->|ok| out[answer + citations]
+```
+````
+
+**Data-flow (ingestion)** and **sequence (one request, with the abstain gate)**:
+````
+```mermaid
+flowchart LR
+    s[source] --> p[parse] --> c[chunk — self-contained] --> e[embed — <embed model>] --> i[(index + lineage: src ver, model, ts)]
+```
+```mermaid
+sequenceDiagram
+    actor U as caller
+    participant G as gateway
+    participant R as retriever
+    participant M as model
+    U->>G: query
+    G->>R: retrieve(top-k, caller ACL)
+    R-->>G: authorised chunks (with scores)
+    alt no chunk above threshold
+      G-->>U: abstain — no model call (cheapest gate)
+    else have grounding
+      G->>M: prompt + chunks
+      M-->>G: answer
+      alt confidence >= gate
+        G-->>U: answer + citations
+      else below gate
+        G-->>U: abstain ("not answerable from sources")
+      end
+    end
+```
+````
+
 ## 6. When a component is to be built — the factory outputs
 Do not stop at the document. Scaffold, to the project's language:
 - **Secure-by-default reference code** for the component (e.g. a retrieval function with the query-time
