@@ -51,6 +51,11 @@ effectively zero; regulation forbids it.
   prompt first → add **RAG** only if the answer needs knowledge outside the model's training →
   consider **fine-tuning** only after a measured prompting ceiling → fall back to **classical ML**
   whenever the task is discriminative, bounded, labelled, and latency/cost-constrained.
+- **High-stakes / citation-grade exception:** if the output must cite verifiable sources or a wrong
+  answer carries legal/medical/financial consequence, do **not** recommend vanilla RAG — flag that
+  *standard RAG is insufficient here* and that it needs citation verification, reranking, and a
+  designed-for-failure retrieval layer (the "when standard RAG fails" case). Say so explicitly rather
+  than letting "RAG" imply the naive version is enough.
 
 ### 4. Decompose the request
 Treat the business ask as a bundle, not one task. Break it into component sub-tasks
@@ -59,8 +64,23 @@ Treat the business ask as a bundle, not one task. Break it into component sub-ta
 table: task type, candidate approach, latency/criticality.
 
 ### 5. Write the document
-Produce a professional markdown file (default `docs/scoping-<project-slug>.md`) with exactly these
-sections:
+Produce a professional markdown file (default `docs/scoping-<project-slug>.md`). Begin it with a
+small YAML front-matter block so the next skill in the pipeline can consume the decision without
+re-reading the prose, then the sections:
+
+```yaml
+---
+project: <name>
+feasibility_verdict: fit | fit-with-caveats | disqualified
+approach_category: rag | rag-augmented | classifier | generative | agent | hybrid | none-deterministic
+components:            # the decomposed sub-tasks and their approach
+  - { task: <name>, approach: <approach>, criticality: <low|medium|high|none> }
+key_constraints: [ <latency P95>, <data residency>, <regulatory>, ... ]
+open_unknowns: [ ... ]
+---
+```
+
+Then exactly these sections:
 1. **Problem statement** — the real business outcome, tied to a metric a sponsor cares about.
 2. **AI approach category** — RAG / classifier / generative pipeline / agent / hybrid, one-line rationale.
 3. **System boundary** — what it owns, what it explicitly does not, upstream inputs, downstream consumers.
