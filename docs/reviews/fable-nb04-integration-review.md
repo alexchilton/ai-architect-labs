@@ -48,3 +48,15 @@ graphviz-rendered PNG cell outputs, which GitHub's notebook renderer does displa
 The 50,000 EUR case (schema-valid, semantically sane, business-invalid) is the sharpest example; stop-at-first
 tiering; escalate-never-retry as control flow; the breaker demo with its half-open caveat; the num_predict
 latency lever (0.89s vs 12.3s) is real and large.
+
+## Verification round (2026-10-18)
+Fable re-verified: S1, H1, H2 and all mediums confirmed fixed. Residuals found and fixed:
+- **S2 not fully fixed** — the 5-short/5-long mix put P50 on a long call (P95≈max), so "P95 well above P50"
+  was false. Fixed: skew to 8 short + 2 long; now P50≈1.75s, P95≈9.49s (real tail), decode 181x prefill.
+- **H3 partial** — the swap only relabelled the tier (model unchanged, different inputs). Fixed: same input
+  both calls, route printed, CALLS A→B observable; narration says the `model` field is where a provider swap
+  goes and that a model swap doesn't preserve behaviour.
+- **Q4 stale** — referenced a deleted fixed-prompt run; rewritten for the mixed workload, no hardcoded seconds.
+- **S1 test too weak** — only asserted attempts==2; now a recording provider proves the correction was fed
+  back (`received == [None, <error>]`).
+- Dropped a duplicate crafted case; de-hardcoded the ready banner to `arch_kit.CHAT_MODEL`.
